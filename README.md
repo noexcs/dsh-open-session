@@ -14,26 +14,11 @@ address is what turns a session into a team you can build and talk to — see
 It is host-only: no client half, no dependencies beyond the host's own `@deepseek-ai/*` packages (declared as npm
 peer dependencies), nothing else to run.
 
-## What the tool does
-
-```text
-open_session(cwd, preset?, message?, title?)
-```
-
-| Argument  | Meaning                                                                                                      |
-| --------- | ------------------------------------------------------------------------------------------------------------ |
-| `cwd`     | Absolute path the new session works in. Must be an existing directory; the call is refused before anything is created otherwise. |
-| `preset`  | Optional host agent-preset name; omitted means the host's default preset.                                     |
-| `message` | Optional first prompt, sent as soon as the session exists. What takes the session out of the host's *blank* state, and how standing instructions travel to a session nobody is watching. |
-| `title`   | Optional title. Omitted, one is derived from the message's first line — deterministic, no model call.         |
-
-It reports the session id, the title it ended up with, and the workspace it was accounted in — one `field=value`
-line each, which is what the calling model reads.
-
 ## Install
 
 The plugin is a Cordis **bundle** (`dsh.bundle` manifest + `cordis.patch.yml`), and it installs from its release
-tarball as one profile entry. Nothing is built on the installing machine.
+tarball as one profile entry. Nothing is built on the installing machine. It needs a DeepSeek Harness of the
+0.2.x series (its declared peer range is `>=0.1.7-rc.2 <0.3.0`) and nothing else.
 
 ```sh
 # any profile the CLI manages
@@ -58,17 +43,45 @@ Every session created afterwards gets the tool on its own scope.
 You do not call the tool — you ask your session to. What you say is ordinary:
 
 ```text
-> open a worker in ~/proj to fix the failing CI, and let it work on its own
+> open a worker in /path/to/proj to fix the failing CI, and let it work on its own
 ```
 
-The session calls `open_session(cwd="/Users/you/proj", title="…", message="…")`, and a **titled session appears in
-your session list**. From then on it is a session like any other: you can open it, type in it, and (with
-[`ace-dsh`](#with-ace-dsh-the-other-half-of-a-team)) another agent can reach it.
+The session calls `open_session(cwd="/path/to/proj", title="…", message="…")` and reports back:
+
+```text
+session=session-5c563a5f…   title=ace-worker-1   workspace=/path/to/proj
+```
+
+A **titled session appears in your session list**. From then on it is a session like any other: you can open it,
+type in it, and (with [`ace-dsh`](#with-ace-dsh-the-other-half-of-a-team)) another agent can reach it.
 
 Use it when you want a **peer**: something that keeps existing after this turn, appears in the session list, can be
 reached from elsewhere, and can be handed standing instructions. Do not use it for a bounded task whose answer
 belongs in *this* conversation — the host's own subagent tooling is better for that: cheaper, self-cleaning, and
 its result comes straight back.
+
+|  | a subagent | `open_session` |
+|---|---|---|
+| appears in your session list | no | **yes** |
+| lives past the turn that made it | no | **yes** |
+| can be addressed by another agent | no | **yes** (with `ace-dsh`) |
+| can open peers of its own | no | **yes** |
+
+## What the tool does
+
+```text
+open_session(cwd, preset?, message?, title?)
+```
+
+| Argument  | Meaning                                                                                                      |
+| --------- | ------------------------------------------------------------------------------------------------------------ |
+| `cwd`     | Absolute path the new session works in. Must be an existing directory; the call is refused before anything is created otherwise. |
+| `preset`  | Optional host agent-preset name; omitted means the host's default preset.                                     |
+| `message` | Optional first prompt, sent as soon as the session exists. What takes the session out of the host's *blank* state, and how standing instructions travel to a session nobody is watching. |
+| `title`   | Optional title. Omitted, one is derived from the message's first line — deterministic, no model call.         |
+
+It reports the session id, the title it ended up with, and the workspace it was accounted in — one `field=value`
+line each, which is what the calling model reads.
 
 ## What you will notice
 
@@ -78,6 +91,8 @@ its result comes straight back.
 - **The directory must already exist.** A missing `cwd` fails the call; this tool does not create directories for
   you — silently creating a directory a caller did not ask for is how sessions end up in the wrong place.
 - **It opens sessions; it cannot close one.** Disposing a session is the host's (or the user's) decision.
+- **Every worker is a real session.** It costs real tokens, appears in your list, and nothing enforces a limit —
+  and this tool cannot close what it opens. Open the ones you need, and tidy up the rest yourself.
 - **Availability follows the agent.** The tool is registered per agent scope, so a session that was already live
   when the plugin loaded gets it through the backfill (a reload, an enable, a profile inserted late), and a
   session that is disposed and later resumed is a new agent that registers again.
