@@ -6,8 +6,13 @@ One model-facing tool for **DeepSeek Harness**: `open_session` opens a new sessi
 host's own "new session" path does. The session it opens is a **root** session — it appears in the host's session
 list, works on its own, and outlives the call that created it — not a subagent.
 
-It is a host-only plugin: no client half, no dependencies beyond the host's own `@deepseek-ai/*` packages
-(declared as npm peer dependencies), nothing else to run.
+On its own it is a small plugin with one job. Its value shows up next to
+[`ace-dsh`](https://github.com/noexcs/ace-protocol/tree/main/packages/ace-dsh): creating peers and giving them an
+address is what turns a session into a team you can build and talk to — see
+[the other half of a team](#with-ace-dsh-the-other-half-of-a-team).
+
+It is host-only: no client half, no dependencies beyond the host's own `@deepseek-ai/*` packages (declared as npm
+peer dependencies), nothing else to run.
 
 ## What the tool does
 
@@ -22,16 +27,8 @@ open_session(cwd, preset?, message?, title?)
 | `message` | Optional first prompt, sent as soon as the session exists. What takes the session out of the host's *blank* state, and how standing instructions travel to a session nobody is watching. |
 | `title`   | Optional title. Omitted, one is derived from the message's first line — deterministic, no model call.         |
 
-The result is a report of field lines, one fact per line:
-
-```text
-session=session-<uuid>
-cwd=/abs/path
-preset=<resolved preset, when the host has a preset registry>
-title=<explicit or derived, when one was set>
-firstMessage=sent (the session is no longer blank)      ← only when a message was given
-workspace=<path>   or   workspace=(not accounted: …)
-```
+It reports the session id, the title it ended up with, and the workspace it was accounted in — one `field=value`
+line each, which is what the calling model reads.
 
 ## Install
 
@@ -48,16 +45,30 @@ dsh plugin --profile <profile> add \
 # package.json `dependencies` plus the package name to `dsh.profile.bundles`, then restart.
 ```
 
-Then restart the host. Every session created afterwards gets the tool on its own scope.
+Then restart the host. To confirm the layer landed, without starting anything:
 
-## When to use it — and when not to
+```sh
+dsh --profile <profile> --dump-config | grep -A3 dsh-open-session
+```
 
-Use it when you want a **peer**: something that keeps existing after this turn, appears in the session list, can
-be reached from anywhere (see [the other half of a team](#related--the-other-half-of-a-team)), and can be handed
-standing instructions. Give it a `message` and the session starts working immediately, with no one watching.
+Every session created afterwards gets the tool on its own scope.
 
-Do not use it for a bounded task whose answer belongs in *this* conversation: the host's own subagent tooling is
-better for that — cheaper, self-cleaning, and its result comes straight back.
+## Using it
+
+You do not call the tool — you ask your session to. What you say is ordinary:
+
+```text
+> open a worker in ~/proj to fix the failing CI, and let it work on its own
+```
+
+The session calls `open_session(cwd="/Users/you/proj", title="…", message="…")`, and a **titled session appears in
+your session list**. From then on it is a session like any other: you can open it, type in it, and (with
+[`ace-dsh`](#with-ace-dsh-the-other-half-of-a-team)) another agent can reach it.
+
+Use it when you want a **peer**: something that keeps existing after this turn, appears in the session list, can be
+reached from elsewhere, and can be handed standing instructions. Do not use it for a bounded task whose answer
+belongs in *this* conversation — the host's own subagent tooling is better for that: cheaper, self-cleaning, and
+its result comes straight back.
 
 ## What you will notice
 
@@ -71,7 +82,7 @@ better for that — cheaper, self-cleaning, and its result comes straight back.
   when the plugin loaded gets it through the backfill (a reload, an enable, a profile inserted late), and a
   session that is disposed and later resumed is a new agent that registers again.
 
-## Related — the other half of a team
+## With ace-dsh: the other half of a team
 
 [`ace-dsh`](https://github.com/noexcs/ace-protocol/tree/main/packages/ace-dsh) is the ACE host plugin for the
 same host. The two plugins are independent — neither imports the other, and either installs alone — but they are
@@ -79,8 +90,8 @@ the two halves of one capability, and installed together they compose into a **m
 
 - this plugin **creates** peers: root sessions that appear in the host's session list and live independently of
   whoever opened them;
-- `ace-dsh` gives each of them an **address**: a channel, discoverable in the broker's agent directory and
-  reachable by any peer — any session on this host, or on another one that speaks the same protocol.
+- `ace-dsh` gives each of them an **address**: a channel, discoverable in the Server's agent directory and
+  reachable by any peer — any session on this host, or on another machine that speaks the same protocol.
 
 So a session can open workers, hand each one its first instruction through `message` (which is also where standing
 authorization travels — a worker told to act on a peer's events does so without asking its user about each one),
@@ -88,59 +99,19 @@ and then talk to them over `ace_publish`. Workers can open workers of their own:
 set too. None of the host's delegation machinery is involved, so no delegation budget constrains the shape of the
 team.
 
-## How it works — the seven steps, and their order
+## How it works, and why the order matters
 
-*This section is for anyone changing the plugin: what the recipe is, and why the order is what it is.*
+The plugin runs the host's own new-session recipe: validate the working directory, compose the agent preset's
+scoped world, carry the current model selection, create and publish the agent, deliver the first prompt, name the
+session, and account it in its workspace. Two of those are load-bearing in ways that are easy to get wrong:
 
-When the tool is called, the plugin runs the host's own new-session recipe, in this order:
+- the **preset and the model selection** have to be part of the *creation request*, so the scoped world is mounted
+  while the agent is being published, before its first turn;
+- the **workspace accounting** is what makes the session appear in the host's list at all — a session that is
+  created but never attached is persisted and reachable, yet invisible.
 
-1. **Ensure the directory** — `mkdir(cwd, { recursive: true })`. Validation has already rejected a
-   missing or non-absolute `cwd` (below), so this is the belt to that suspenders: a session is never
-   created whose working directory cannot be guaranteed.
-2. **Compose the preset** — the optional `agentPresets` service is read *now*, `resolve(preset)` names
-   the preset (a missing name falls back to the host's default), and a `setup` closure is attached to
-   the creation request so the preset's scoped world (tools, prompt, model selection) is mounted **while
-   the agent is being published**, before its first turn.
-3. **Carry the model selection** — the optional `agentDefaultModel` service is read *now* and its
-   `currentSelection()` is passed as `agentOptions`, so the fresh session logs the same provider/model
-   the user has selected, not a silent default.
-4. **Create the agent** — `agents.create({ sessionId, agentOptions, meta: { cwd, agentPreset }, setup })`
-   with a self-minted `session-<uuid>` id. The factory publishes the session and the agent and
-   **awaits** that publication, so the new session is a first-class session before this call resolves.
-   This step must come after 2–3: the preset and the model selection are part of the creation request,
-   and the session id must exist before anything can be recorded against it.
-5. **Deliver the first prompt** — when a `message` was given, it goes in through the created handle's
-   `followup`, as a real host user message. Its provenance is the plugin's own source variant
-   (`kind: "open-session"`, merged into the host's `MessageSourceMap` through the documented
-   `declare module` extension point) with `form: "relay"` — the vocabulary's name for a message one
-   agent addressed to another — and `openedBy` naming the calling session. Two things depend on this
-   step coming after 4: the session must exist to receive it, and sending it is what flips the session
-   out of the host's *blank* state (blank sessions are hidden from the session list unless viewed).
-6. **Name it** — an explicit `title` is set verbatim; with only a `message`, the title is derived from
-   its first non-empty line (trimmed, leading markers stripped, capped at 60 characters — no model
-   call, no guessing). The session object comes from the host's session store and the title from the
-   host's title service, both optional: with neither a title is left for the host's own first-prompt
-   titler, and this tool does not second-guess it.
-7. **Account the workspace** — the optional `workspaceRegistry` service resolves (or creates) the
-   workspace for `cwd` and attaches the session id to it. **This is the step the host's session list
-   depends on**: a workspace's members are explicit durable state, not something derived from sessions'
-   working directories, so a session that is created but never attached is persisted — and absent from
-   the list. It is last because it is also the step allowed to fail: an accounting failure costs the
-   list entry, never the session, and the report says `workspace=(not accounted: …)` instead.
-
-Two cross-cutting rules:
-
-- **Validation before creation.** `cwd` must be a non-empty absolute path naming an existing directory;
-  `message`/`title`, once given, must be non-empty after trimming; `preset`, once given, must be a
-  string. Anything else throws before the host is asked for a session — a session is durable state, and
-  a bad argument must fail the call, not produce a session in the wrong place.
-- **Optional services, read at call time.** Every service in steps 2, 3, 6 and 7 is read when the tool
-  is called, never once at plugin load. A headless or SDK host without any of them still gets a working
-  tool that opens plain sessions and says so in the report.
-
-The tool itself is registered on `agent/created`, on the agent's own scoped context
-(`agent.ctx.tools.register(…)`), so a session that does not want it never sees it, and everything the
-plugin registers unwinds with the agent's own scope.
+The full recipe — every step, in order, with the reason it sits where it does — is documented in the source
+([`src/index.ts`](src/index.ts)), and asserted step by step by the tests and the bundle verification.
 
 ## Development
 
@@ -148,17 +119,9 @@ plugin registers unwinds with the agent's own scope.
 npm install          # .npmrc sets legacy-peer-deps: host packages are npm peers, provided by the profile
 npm run build        # tsc (types) + esbuild (the single-file lib/index.js + dist-package/)
 npm run check        # biome (lint + format) + tsc --noEmit
-npm test             # vitest: the binding and the recipe, driven through the host's own defineTool
-                     # against a stub host (optional services present, absent, or failing)
-npm run verify:bundle  # the same recipe re-run against the *built* lib/index.js: proof the installed
-                     # artifact resolves, compiles and behaves
+npm test             # vitest, against a stub host (optional services present, absent, or failing)
+npm run verify:bundle  # the same recipe against the *built* lib/index.js
 ```
-
-The vitest suite and the bundle verification assert the same steps: the model selection and the resolved preset
-reach the factory, the preset's `setup` mounts, the first prompt lands as a relay from the calling session, an
-explicit title goes through the host's rename, a message-only call gets a derived title, the workspace attach is
-recorded, bad arguments are refused before creation, and a host with none of the optional services still opens a
-session.
 
 ## Known limitations
 
