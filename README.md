@@ -131,8 +131,10 @@ with none of the optional services still opens a session.
 - **The working directory must already exist.** Validation rejects a missing `cwd` (the recursive
   `mkdir` in step 1 is a safety net against a race, not the creation path). This is deliberate:
   silently creating directories a caller did not ask for is how sessions end up in the wrong place.
-- **No retroactive registration.** Agents that are already live when the plugin becomes active do not
-  get the tool — registration happens on `agent/created` only. Restarting the host picks them up.
+- **Registration follows the agent, not the session.** The tool is registered for every live agent — new ones
+  on `agent/created`, and ones that were already live when the plugin loaded (a reload, an enable, a profile
+  inserted late) through the backfill. A session that is disposed and later resumed is a new agent with a new
+  scope, and registers again.
 - **Title derivation is first-line only.** No model call, by design. For long first prompts, pass a
   `title`.
 - **Opens, never closes.** The tool cannot dispose a session it opened; that is the host's (or the

@@ -193,7 +193,8 @@ export function apply(ctx: Context): void {
 	 * The host's own recipe for a session — the one its "new session" path uses.
 	 *
 	 * Seven steps, and every one of them matters for the result to be an ordinary session rather than a
-	 * half-built one: ensure the directory, compose the preset's scoped world, carry the model selection a
+	 * half-built one: validate the working directory (the recursive `mkdir` here is a race safety net, not the
+	 * creation path), compose the preset's scoped world, carry the model selection a
 	 * fresh session would log, create the agent, deliver the first prompt, set the title, and account the
 	 * session in its workspace. Skipping the last step is the subtle one: a session's workspace membership
 	 * is explicit durable state, not something derived from its working directory, so a session that is
@@ -283,9 +284,21 @@ export function apply(ctx: Context): void {
 		}
 	}
 
+	/**
+	 * Live sessions that already carry the tool.
+	 *
+	 * Two edges can register the same agent — the `agent/created` edge and the backfill below — and this guard is
+	 * what keeps one agent from ending up with two tools of the same name. It is cleared when an agent is
+	 * disposed, on purpose: a resumed session is a *new* agent with a new scope, and it has to register again.
+	 */
+	const registered = new Set<string>();
+
 	/** Register the per-agent surface. Everything here unwinds with the agent's own scope. */
 	function bind(agent: HostAgent): void {
 		const scoped = agent.ctx;
+		const sessionId = String(agent.session.id);
+		if (registered.has(sessionId)) return;
+		registered.add(sessionId);
 		// The caller's own session id, bound into the opener: it is where the first prompt's `openedBy`
 		// provenance comes from, and it is read here, once per agent, not at plugin load.
 		const callerSessionId = String(agent.session.id);
@@ -303,4 +316,19 @@ export function apply(ctx: Context): void {
 			report("[dsh-open-session] could not register open_session in a new session", error);
 		}
 	});
+
+	ctx.on("agent/disposed", (payload) => {
+		registered.delete(String((payload.agent as unknown as HostAgent).session.id));
+	});
+
+	// Backfill. An agent that was already live when this plugin loaded never sees an `agent/created` edge of its
+	// own — a reload, an enable, or a profile that inserted this row after the session had started — so without
+	// this the tool would exist only in sessions created after a host restart.
+	for (const agent of ctx.agents.list()) {
+		try {
+			bind(agent as unknown as HostAgent);
+		} catch (error) {
+			report("[dsh-open-session] could not register open_session in an already-live session", error);
+		}
+	}
 }

@@ -36,6 +36,8 @@ interface Recorded {
 	tools: Array<{ name: string; description: string; parameters: unknown }>;
 	/** Lifecycle handlers by event name. */
 	events: Map<string, Array<(payload: unknown) => unknown>>;
+	/** The live agents the host would report: what the backfill reads. */
+	liveAgents: unknown[];
 	/** Effects as Cordis runs them: the initializer ran, and its returned disposer is kept under its label. */
 	effects: Array<{ label: string; disposer: unknown }>;
 	/** Every `agents.create()` the plugin asked the host for: the sessions it opened. */
@@ -54,6 +56,7 @@ function newRecorded(): Recorded {
 	return {
 		tools: [],
 		events: new Map(),
+		liveAgents: [],
 		effects: [],
 		opened: [],
 		mounted: [],
@@ -84,7 +87,7 @@ function stubHost(recorded: Recorded, options: { hostServices?: boolean; workspa
 		// the agent's own scope, and a stub that answered it would hide that.
 		tools: scoped.tools,
 		agents: {
-			list: () => [] as unknown[],
+			list: () => recorded.liveAgents,
 			// The created session is *not* really created here: the stub only records the request and plays
 			// back the handle, which is the whole of what the recipe does with it.
 			create: async (options: Record<string, unknown>) => {
@@ -195,9 +198,49 @@ describe("the dsh-open-session plugin entry", () => {
 		const host = stubHost(recorded);
 		apply(host.ctx as unknown as Context);
 
-		expect([...recorded.events.keys()]).toEqual(["agent/created"]);
+		expect([...recorded.events.keys()]).toEqual(["agent/created", "agent/disposed"]);
 		// Nothing global and nothing per-session yet: the tool is registered when an agent exists.
 		expect(recorded.tools).toEqual([]);
+	});
+
+	it("registers into sessions that were already live when the plugin loaded", async () => {
+		const recorded = newRecorded();
+		const host = stubHost(recorded);
+		// An agent that existed before this plugin loaded never sees an `agent/created` edge of its own.
+		recorded.liveAgents.push(agentFor("s-live", host.scoped));
+
+		apply(host.ctx as unknown as Context);
+
+		expect(recorded.tools.map((tool) => tool.name)).toEqual([OPEN_SESSION_TOOL]);
+	});
+
+	it("registers an already-live session once, even when both edges see it", () => {
+		const recorded = newRecorded();
+		const host = stubHost(recorded);
+		const live = agentFor("s-both", host.scoped);
+		recorded.liveAgents.push(live);
+
+		apply(host.ctx as unknown as Context);
+		// The same agent also arrives as a creation edge: two registrations of one name would be one too many.
+		for (const handler of host.recorded.events.get("agent/created") ?? []) handler({ agent: live });
+
+		expect(recorded.tools).toHaveLength(1);
+	});
+
+	it("registers a session again after it was disposed and resumed", async () => {
+		const recorded = newRecorded();
+		const host = stubHost(recorded);
+		apply(host.ctx as unknown as Context);
+		await fireCreated(host, "s-again");
+		expect(recorded.tools).toHaveLength(1);
+
+		// Disposal ends the agent's scope; a resume mints a new one, so the tool has to be registered again.
+		for (const handler of host.recorded.events.get("agent/disposed") ?? []) {
+			handler({ agent: agentFor("s-again", host.scoped) });
+		}
+		await fireCreated(host, "s-again");
+
+		expect(recorded.tools).toHaveLength(2);
 	});
 
 	it("registers exactly one tool on the agent's own scope, compiled through the host's own defineTool", async () => {
