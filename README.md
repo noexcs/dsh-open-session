@@ -35,16 +35,18 @@ workspace=<path>   or   workspace=(not accounted: …)
 The plugin is a Cordis **bundle** (`dsh.bundle` manifest + `cordis.patch.yml`), so `dsh plugin` installs it:
 
 ```sh
-# a local checkout (linked)
-dsh plugin --profile <profile> add /abs/path/to/dsh-open-session
+# any profile the CLI manages: the release tarball
+dsh plugin --profile <profile> add \
+  https://github.com/noexcs/dsh-open-session/releases/download/v0.1.0/dsh-open-session-0.1.0.tgz
 
-# from GitHub; lib/ is committed, so no build step runs on the installing machine
-dsh plugin --profile <profile> add github:noexcs/dsh-open-session
-
-# or the slim install directory the build produces
-npm ci && npm run build
-dsh plugin --profile <profile> add /abs/path/to/dsh-open-session/dist-package
+# the desktop application's profile is managed by the app (`dsh plugin --profile desktop` is refused),
+# so install there through its plugin manager — or by hand: add the same URL to the profile's
+# package.json `dependencies` plus the package name to `dsh.profile.bundles`, then restart.
 ```
+
+Other equally valid sources: the package on GitHub (`dsh plugin --profile <profile> add github:noexcs/dsh-open-session`
+— `lib/` is committed, so nothing builds), or a local checkout
+(`npm ci && npm run build && dsh plugin --profile <profile> add /abs/path/to/dsh-open-session/dist-package`).
 
 Then restart the host, and verify the layer landed without starting anything:
 
