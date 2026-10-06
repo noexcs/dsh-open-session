@@ -2,11 +2,12 @@
 
 > English | [中文](README.zh-CN.md)
 
-A **DeepSeek Harness (DSH) host plugin** that adds one model-facing tool, `open_session`, to every
-session: it opens a new root session **on the same host**, the way the host's own new-session path does.
+One model-facing tool for **DeepSeek Harness**: `open_session` opens a new session on the same host, the way the
+host's own "new session" path does. The session it opens is a **root** session — it appears in the host's session
+list, works on its own, and outlives the call that created it — not a subagent.
 
-It is a host-only plugin: no client half, no dependencies beyond the host's own `@deepseek-ai/*`
-packages (declared as npm peer dependencies), nothing else to run.
+It is a host-only plugin: no client half, no dependencies beyond the host's own `@deepseek-ai/*` packages
+(declared as npm peer dependencies), nothing else to run.
 
 ## What the tool does
 
@@ -34,10 +35,11 @@ workspace=<path>   or   workspace=(not accounted: …)
 
 ## Install
 
-The plugin is a Cordis **bundle** (`dsh.bundle` manifest + `cordis.patch.yml`), so `dsh plugin` installs it:
+The plugin is a Cordis **bundle** (`dsh.bundle` manifest + `cordis.patch.yml`), and it installs from its release
+tarball as one profile entry. Nothing is built on the installing machine.
 
 ```sh
-# any profile the CLI manages: the release tarball
+# any profile the CLI manages
 dsh plugin --profile <profile> add \
   https://github.com/noexcs/dsh-open-session/releases/download/v0.1.0/dsh-open-session-0.1.0.tgz
 
@@ -46,21 +48,49 @@ dsh plugin --profile <profile> add \
 # package.json `dependencies` plus the package name to `dsh.profile.bundles`, then restart.
 ```
 
-Other equally valid sources: the package on GitHub (`dsh plugin --profile <profile> add github:noexcs/dsh-open-session`
-— `lib/` is committed, so nothing builds), or a local checkout
-(`npm ci && npm run build && dsh plugin --profile <profile> add /abs/path/to/dsh-open-session/dist-package`).
+Then restart the host. Every session created afterwards gets the tool on its own scope.
 
-Then restart the host, and verify the layer landed without starting anything:
+## When to use it — and when not to
 
-```sh
-dsh --profile <profile> --dump-config | grep -A3 dsh-open-session
-```
+Use it when you want a **peer**: something that keeps existing after this turn, appears in the session list, can
+be reached from anywhere (see [the other half of a team](#related--the-other-half-of-a-team)), and can be handed
+standing instructions. Give it a `message` and the session starts working immediately, with no one watching.
 
-Every session created afterwards gets the tool on its own scope. `lib/` is committed as the built
-artifact, so none of the install paths need to build anything; if you change `src/`, run
-`npm run build` before installing.
+Do not use it for a bounded task whose answer belongs in *this* conversation: the host's own subagent tooling is
+better for that — cheaper, self-cleaning, and its result comes straight back.
+
+## What you will notice
+
+- **A session opened without a `message` is invisible.** The host hides *blank* sessions (no prompt yet) from the
+  session list unless they are the one being viewed — so a session opened with only a `cwd` is real and reachable,
+  but not listed until someone speaks to it. A `message` is one way; typing in it is another.
+- **The directory must already exist.** A missing `cwd` fails the call; this tool does not create directories for
+  you — silently creating a directory a caller did not ask for is how sessions end up in the wrong place.
+- **It opens sessions; it cannot close one.** Disposing a session is the host's (or the user's) decision.
+- **Availability follows the agent.** The tool is registered per agent scope, so a session that was already live
+  when the plugin loaded gets it through the backfill (a reload, an enable, a profile inserted late), and a
+  session that is disposed and later resumed is a new agent that registers again.
+
+## Related — the other half of a team
+
+[`ace-dsh`](https://github.com/noexcs/ace-protocol/tree/main/packages/ace-dsh) is the ACE host plugin for the
+same host. The two plugins are independent — neither imports the other, and either installs alone — but they are
+the two halves of one capability, and installed together they compose into a **multi-agent team**:
+
+- this plugin **creates** peers: root sessions that appear in the host's session list and live independently of
+  whoever opened them;
+- `ace-dsh` gives each of them an **address**: a channel, discoverable in the broker's agent directory and
+  reachable by any peer — any session on this host, or on another one that speaks the same protocol.
+
+So a session can open workers, hand each one its first instruction through `message` (which is also where standing
+authorization travels — a worker told to act on a peer's events does so without asking its user about each one),
+and then talk to them over `ace_publish`. Workers can open workers of their own: `open_session` is in their tool
+set too. None of the host's delegation machinery is involved, so no delegation budget constrains the shape of the
+team.
 
 ## How it works — the seven steps, and their order
+
+*This section is for anyone changing the plugin: what the recipe is, and why the order is what it is.*
 
 When the tool is called, the plugin runs the host's own new-session recipe, in this order:
 
@@ -115,7 +145,7 @@ plugin registers unwinds with the agent's own scope.
 ## Development
 
 ```sh
-npm install          # .npmrc sets legacy-peer-deps: host packages are peers, provided by the profile
+npm install          # .npmrc sets legacy-peer-deps: host packages are npm peers, provided by the profile
 npm run build        # tsc (types) + esbuild (the single-file lib/index.js + dist-package/)
 npm run check        # biome (lint + format) + tsc --noEmit
 npm test             # vitest: the binding and the recipe, driven through the host's own defineTool
@@ -124,46 +154,17 @@ npm run verify:bundle  # the same recipe re-run against the *built* lib/index.js
                      # artifact resolves, compiles and behaves
 ```
 
-The vitest suite and the bundle verification assert the same steps: the model selection and the
-resolved preset reach the factory, the preset's `setup` mounts, the first prompt lands as a relay from
-the calling session, an explicit title goes through the host's rename, a message-only call gets a
-derived title, the workspace attach is recorded, bad arguments are refused before creation, and a host
-with none of the optional services still opens a session.
+The vitest suite and the bundle verification assert the same steps: the model selection and the resolved preset
+reach the factory, the preset's `setup` mounts, the first prompt lands as a relay from the calling session, an
+explicit title goes through the host's rename, a message-only call gets a derived title, the workspace attach is
+recorded, bad arguments are refused before creation, and a host with none of the optional services still opens a
+session.
 
 ## Known limitations
 
-- **The working directory must already exist.** Validation rejects a missing `cwd` (the recursive
-  `mkdir` in step 1 is a safety net against a race, not the creation path). This is deliberate:
-  silently creating directories a caller did not ask for is how sessions end up in the wrong place.
-- **The tool is registered per agent scope, not per session.** "Registered" here means one thing only: the host
-  puts this tool in that agent's own tool registry (`agent.ctx.tools.register(…)`). It happens for new agents on
-  `agent/created`, and for agents that were already live when the plugin loaded (a reload, an enable, a profile
-  inserted late) through the backfill. A session that is disposed and later resumed is a *new* agent with a new
-  scope, so the tool is registered for it again.
-- **Title derivation is first-line only.** No model call, by design. For long first prompts, pass a
-  `title`.
-- **Opens, never closes.** The tool cannot dispose a session it opened; that is the host's (or the
-  user's) decision.
-- **Host package range.** Type-checked and tested against the `0.2.0-rc.2` host packages; the declared peer
-  ranges (npm peer dependencies — nothing to do with agent peers) admit `>=0.1.7-rc.2 <0.3.0` for the rest of
-  the series.
-
-## Related — the other half of a team
-
-[`ace-dsh`](https://github.com/noexcs/ace-protocol/tree/main/packages/ace-dsh) is the ACE host plugin for the
-same host. The two plugins are independent — neither imports the other, and either installs alone — but they are
-the two halves of one capability, and installed together they compose into a **multi-agent team**:
-
-- this plugin **creates** peers: root sessions that appear in the host's session list and live independently of
-  whoever opened them;
-- `ace-dsh` gives each of them an **address**: a channel, discoverable in the broker's agent directory and
-  reachable by any peer — any session on this host, or on another one that speaks the same protocol.
-
-So a session can open workers, hand each one its first instruction through `message` (which is also where
-standing authorization travels — a worker told to act on a peer's events does so without asking its user about
-each one), and then talk to them over `ace_publish`. Workers can open workers of their own: `open_session` is in
-their tool set too. None of the host's delegation machinery is involved, so no delegation budget constrains the
-shape of the team.
+- **Title derivation is first-line only.** No model call, by design. For long first prompts, pass a `title`.
+- **Host package range.** Type-checked and tested against the `0.2.0-rc.2` host packages; the declared peer ranges
+  (npm peer dependencies — nothing to do with agent peers) admit `>=0.1.7-rc.2 <0.3.0` for the rest of the series.
 
 ## License
 
