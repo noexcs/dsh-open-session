@@ -119,13 +119,19 @@ workspace attach 被记录、坏参数在创建前被拒、以及一个没有任
 
 - **工作目录必须已存在。** 校验会拒绝不存在的 `cwd`（第 1 步里的递归 `mkdir` 是防竞态的安全网，不是创建路径）。
   这是刻意的：悄悄创建调用方没有要求的目录，正是会话跑到错误地方去的原因。
-- **注册跟随 agent，而不是会话。** 工具为每个活着的 agent 注册 —— 新的走 `agent/created`，
-  在插件装载时就已经活着的（重载、启用、profile 后来才插入）走 backfill。
-  一个被 dispose 之后又被 resume 的会话是一个拥有新作用域的新 agent，它会被重新注册。
+- **工具注册在 agent 作用域上，而不是会话上。** 这里说的"注册"只有一件事：宿主把这个工具放进该 agent
+  自己的工具表里（`agent.ctx.tools.register(…)`）。新的 agent 走 `agent/created`；插件装载时就已经活着的
+  （重载、启用、profile 后来才插入）走 backfill。被 dispose 之后又被 resume 的会话是一个拥有**新**作用域的
+  新 agent，所以工具会为它重新注册。
 - **标题派生只用第一行。** 按设计不调模型。第一句话很长时，请显式传 `title`。
 - **只开，不关。** 工具无法 dispose 它打开的会话；那是宿主（或用户）的决定。
 - **宿主包版本范围。** 类型检查与测试都对着 `0.2.0-rc.2` 的宿主包；声明的 peer 范围
   （指 npm peer 依赖，与 agent 对端无关）对该系列其余版本放宽到 `>=0.1.7-rc.2 <0.3.0`。
+
+## 相关
+
+[`ace-dsh`](https://github.com/noexcs/ace-protocol/tree/main/packages/ace-dsh) —— 同一宿主上的 ACE 宿主插件。
+两个插件彼此独立：各自安装，互不 import。
 
 ## License
 

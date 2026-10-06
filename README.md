@@ -135,10 +135,11 @@ with none of the optional services still opens a session.
 - **The working directory must already exist.** Validation rejects a missing `cwd` (the recursive
   `mkdir` in step 1 is a safety net against a race, not the creation path). This is deliberate:
   silently creating directories a caller did not ask for is how sessions end up in the wrong place.
-- **Registration follows the agent, not the session.** The tool is registered for every live agent — new ones
-  on `agent/created`, and ones that were already live when the plugin loaded (a reload, an enable, a profile
-  inserted late) through the backfill. A session that is disposed and later resumed is a new agent with a new
-  scope, and registers again.
+- **The tool is registered per agent scope, not per session.** "Registered" here means one thing only: the host
+  puts this tool in that agent's own tool registry (`agent.ctx.tools.register(…)`). It happens for new agents on
+  `agent/created`, and for agents that were already live when the plugin loaded (a reload, an enable, a profile
+  inserted late) through the backfill. A session that is disposed and later resumed is a *new* agent with a new
+  scope, so the tool is registered for it again.
 - **Title derivation is first-line only.** No model call, by design. For long first prompts, pass a
   `title`.
 - **Opens, never closes.** The tool cannot dispose a session it opened; that is the host's (or the
@@ -146,6 +147,11 @@ with none of the optional services still opens a session.
 - **Host package range.** Type-checked and tested against the `0.2.0-rc.2` host packages; the declared peer
   ranges (npm peer dependencies — nothing to do with agent peers) admit `>=0.1.7-rc.2 <0.3.0` for the rest of
   the series.
+
+## Related
+
+[`ace-dsh`](https://github.com/noexcs/ace-protocol/tree/main/packages/ace-dsh) — the ACE host plugin for the
+same host. The two plugins are independent: each installs on its own, and neither imports the other.
 
 ## License
 
