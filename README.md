@@ -3,22 +3,38 @@
 > English | [中文](README.zh-CN.md)
 
 One model-facing tool for **DeepSeek Harness**: `open_session` opens a new session on the same host, the way the
-host's own "new session" path does. The session it opens is a **root** session — it appears in the host's session
-list, works on its own, and outlives the call that created it — not a subagent.
-
-On its own it is a small plugin with one job. Its value shows up next to
-[`ace-dsh`](https://github.com/noexcs/ace-protocol/tree/main/packages/ace-dsh): creating peers and giving them an
-address is what turns a session into a team you can build and talk to — see
-[the other half of a team](#with-ace-dsh-the-other-half-of-a-team).
+host's own "new session" path does. On its own that is a small plugin with one job — and the value lands next to
+[`ace-dsh`](https://github.com/noexcs/ace-protocol/tree/main/packages/ace-dsh), where creating peers and giving them
+an address is what turns a session into a team you can build and talk to.
 
 It is host-only: no client half, no dependencies beyond the host's own `@deepseek-ai/*` packages (declared as npm
 peer dependencies), nothing else to run.
 
+## A peer, not a subagent
+
+`open_session` does not spawn a child that answers and disappears. It opens a **real session**, the same kind you
+make by hand:
+
+- it **appears in your session list**, under a title derived from its first message;
+- it **outlives the turn** that created it, and keeps working with nobody watching;
+- it can be **addressed by another agent** (with [`ace-dsh`](#with-ace-dsh-the-other-half-of-a-team) installed);
+- it can **open peers of its own** — `open_session` is in its tool set too.
+
+For a bounded task whose answer belongs in *this* conversation, use the host's own subagent tooling instead:
+cheaper, self-cleaning, and its result comes straight back.
+
+You do not call the tool — you ask your session to:
+
+```text
+> open a worker in /path/to/proj to fix the failing CI, and let it work on its own
+    → session=session-5c563a5f…   title=ace-worker-1   workspace=/path/to/proj
+    → a titled session appears in your list, and it is already working
+```
+
 ## Install
 
-The plugin is a Cordis **bundle** (`dsh.bundle` manifest + `cordis.patch.yml`), and it installs from its release
-tarball as one profile entry. Nothing is built on the installing machine. It needs a DeepSeek Harness of the
-0.2.x series (its declared peer range is `>=0.1.7-rc.2 <0.3.0`) and nothing else.
+Install the release tarball into a profile and restart the host. Nothing is built on the installing machine, and
+it needs a DeepSeek Harness of the 0.2.x series (`>=0.1.7-rc.2 <0.3.0`) — nothing else.
 
 ```sh
 # any profile the CLI manages
@@ -36,36 +52,8 @@ Then restart the host. To confirm the layer landed, without starting anything:
 dsh --profile <profile> --dump-config | grep -A3 dsh-open-session
 ```
 
-Every session created afterwards gets the tool on its own scope.
-
-## Using it
-
-You do not call the tool — you ask your session to. What you say is ordinary:
-
-```text
-> open a worker in /path/to/proj to fix the failing CI, and let it work on its own
-```
-
-The session calls `open_session(cwd="/path/to/proj", title="…", message="…")` and reports back:
-
-```text
-session=session-5c563a5f…   title=ace-worker-1   workspace=/path/to/proj
-```
-
-A **titled session appears in your session list**. From then on it is a session like any other: you can open it,
-type in it, and (with [`ace-dsh`](#with-ace-dsh-the-other-half-of-a-team)) another agent can reach it.
-
-Use it when you want a **peer**: something that keeps existing after this turn, appears in the session list, can be
-reached from elsewhere, and can be handed standing instructions. Do not use it for a bounded task whose answer
-belongs in *this* conversation — the host's own subagent tooling is better for that: cheaper, self-cleaning, and
-its result comes straight back.
-
-|  | a subagent | `open_session` |
-|---|---|---|
-| appears in your session list | no | **yes** |
-| lives past the turn that made it | no | **yes** |
-| can be addressed by another agent | no | **yes** (with `ace-dsh`) |
-| can open peers of its own | no | **yes** |
+Every session created afterwards gets the tool on its own scope — and a session that was already live when
+you installed picks it up too.
 
 ## What the tool does
 
@@ -90,12 +78,8 @@ line each, which is what the calling model reads.
   but not listed until someone speaks to it. A `message` is one way; typing in it is another.
 - **The directory must already exist.** A missing `cwd` fails the call; this tool does not create directories for
   you — silently creating a directory a caller did not ask for is how sessions end up in the wrong place.
-- **It opens sessions; it cannot close one.** Disposing a session is the host's (or the user's) decision.
-- **Every worker is a real session.** It costs real tokens, appears in your list, and nothing enforces a limit —
-  and this tool cannot close what it opens. Open the ones you need, and tidy up the rest yourself.
-- **Availability follows the agent.** The tool is registered per agent scope, so a session that was already live
-  when the plugin loaded gets it through the backfill (a reload, an enable, a profile inserted late), and a
-  session that is disposed and later resumed is a new agent that registers again.
+- **It opens sessions and cannot close one — and every worker is a real session.** It costs real tokens and takes a
+  real place in your list, with no limit enforced; tidy up the ones you are done with yourself.
 
 ## With ace-dsh: the other half of a team
 
@@ -114,19 +98,12 @@ and then talk to them over `ace_publish`. Workers can open workers of their own:
 set too. None of the host's delegation machinery is involved, so no delegation budget constrains the shape of the
 team.
 
-## How it works, and why the order matters
+## How it works
 
-The plugin runs the host's own new-session recipe: validate the working directory, compose the agent preset's
-scoped world, carry the current model selection, create and publish the agent, deliver the first prompt, name the
-session, and account it in its workspace. Two of those are load-bearing in ways that are easy to get wrong:
-
-- the **preset and the model selection** have to be part of the *creation request*, so the scoped world is mounted
-  while the agent is being published, before its first turn;
-- the **workspace accounting** is what makes the session appear in the host's list at all — a session that is
-  created but never attached is persisted and reachable, yet invisible.
-
-The full recipe — every step, in order, with the reason it sits where it does — is documented in the source
-([`src/index.ts`](src/index.ts)), and asserted step by step by the tests and the bundle verification.
+It runs the host's own new-session recipe: validate the working directory, mount the agent preset's scoped world and
+the current model selection *as part of the creation request*, create and publish the agent, deliver the first
+prompt, name the session, and account it in its workspace — the last of which is exactly what makes a session appear
+in the host's list at all. The full recipe, step by step, is in [`src/index.ts`](src/index.ts).
 
 ## Development
 
