@@ -1,5 +1,7 @@
 # dsh-open-session
 
+> [English](README.md) | 中文
+
 一个 **DeepSeek Harness（DSH）宿主插件**：给每个会话加一个面向模型的工具 `open_session`，它**在同一个宿主上**
 打开一个新的 root 会话 —— 走的正是宿主自己「新建会话」的那条路径。
 
