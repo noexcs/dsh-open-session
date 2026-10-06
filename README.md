@@ -1,5 +1,7 @@
 # dsh-open-session
 
+> English | [中文](README.zh-CN.md)
+
 A **DeepSeek Harness (DSH) host plugin** that adds one model-facing tool, `open_session`, to every
 session: it opens a new root session **on the same host**, the way the host's own new-session path does.
 
