@@ -148,10 +148,22 @@ with none of the optional services still opens a session.
   ranges (npm peer dependencies — nothing to do with agent peers) admit `>=0.1.7-rc.2 <0.3.0` for the rest of
   the series.
 
-## Related
+## Related — the other half of a team
 
-[`ace-dsh`](https://github.com/noexcs/ace-protocol/tree/main/packages/ace-dsh) — the ACE host plugin for the
-same host. The two plugins are independent: each installs on its own, and neither imports the other.
+[`ace-dsh`](https://github.com/noexcs/ace-protocol/tree/main/packages/ace-dsh) is the ACE host plugin for the
+same host. The two plugins are independent — neither imports the other, and either installs alone — but they are
+the two halves of one capability, and installed together they compose into a **multi-agent team**:
+
+- this plugin **creates** peers: root sessions that appear in the host's session list and live independently of
+  whoever opened them;
+- `ace-dsh` gives each of them an **address**: a channel, discoverable in the broker's agent directory and
+  reachable by any peer — any session on this host, or on another one that speaks the same protocol.
+
+So a session can open workers, hand each one its first instruction through `message` (which is also where
+standing authorization travels — a worker told to act on a peer's events does so without asking its user about
+each one), and then talk to them over `ace_publish`. Workers can open workers of their own: `open_session` is in
+their tool set too. None of the host's delegation machinery is involved, so no delegation budget constrains the
+shape of the team.
 
 ## License
 

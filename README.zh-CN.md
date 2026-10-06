@@ -128,10 +128,18 @@ workspace attach 被记录、坏参数在创建前被拒、以及一个没有任
 - **宿主包版本范围。** 类型检查与测试都对着 `0.2.0-rc.2` 的宿主包；声明的 peer 范围
   （指 npm peer 依赖，与 agent 对端无关）对该系列其余版本放宽到 `>=0.1.7-rc.2 <0.3.0`。
 
-## 相关
+## 相关 —— 一个团队的另一半
 
-[`ace-dsh`](https://github.com/noexcs/ace-protocol/tree/main/packages/ace-dsh) —— 同一宿主上的 ACE 宿主插件。
-两个插件彼此独立：各自安装，互不 import。
+[`ace-dsh`](https://github.com/noexcs/ace-protocol/tree/main/packages/ace-dsh) 是同一宿主上的 ACE 宿主插件。
+两个插件彼此独立 —— 互不 import，各自都能单独安装 —— 但它们是一个能力的**两半**，装在一起就组合成一个**多 agent 团队**：
+
+- 本插件负责**造同类**：root 会话，出现在宿主的会话列表里，独立于打开它的那个会话存活；
+- `ace-dsh` 给每一个这样的会话一个**地址**：channel，在 broker 的 agent directory 里可被发现、任何对端都能投递 ——
+  本宿主上的任何会话，或另一个说同一套协议的主机。
+
+于是一个会话可以开若干 worker、用 `message` 把第一句指令交给各自（它同时也是**常驻授权**的载体 —— 被告知"直接处理某个对端事件"的
+worker 不会逐条询问用户），之后用 `ace_publish` 与它们对话。worker 自己还能再开 worker：`open_session` 也在它的工具表里。
+整个过程不牵涉宿主的委派机制，所以团队的形状不受委派预算限制。
 
 ## License
 
