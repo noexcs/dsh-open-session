@@ -5,7 +5,7 @@
 一个 **DeepSeek Harness（DSH）宿主插件**：给每个会话加一个面向模型的工具 `open_session`，它**在同一个宿主上**
 打开一个新的 root 会话 —— 走的正是宿主自己「新建会话」的那条路径。
 
-它是纯宿主插件：没有客户端半、除了宿主自身的 `@deepseek-ai/*` 包（声明为 peer）之外没有依赖，也没有别的东西要跑。
+它是纯宿主插件：没有客户端半、除了宿主自身的 `@deepseek-ai/*` 包（声明为 npm peer 依赖）之外没有依赖，也没有别的东西要跑。
 
 ## 这个工具做什么
 
@@ -102,7 +102,7 @@ dsh --profile <profile> --dump-config | grep -A3 dsh-open-session
 ## 开发
 
 ```sh
-npm install          # .npmrc 设置了 legacy-peer-deps：宿主包是 peer，由 profile 提供
+npm install          # .npmrc 设置了 legacy-peer-deps：宿主包是 npm peer，由 profile 提供
 npm run build        # tsc（类型）+ esbuild（单文件 lib/index.js 与 dist-package/）
 npm run check        # biome（lint + 格式）+ tsc --noEmit
 npm test             # vitest：绑定与配方，通过宿主自己的 defineTool 驱动，
@@ -124,8 +124,8 @@ workspace attach 被记录、坏参数在创建前被拒、以及一个没有任
   一个被 dispose 之后又被 resume 的会话是一个拥有新作用域的新 agent，它会被重新注册。
 - **标题派生只用第一行。** 按设计不调模型。第一句话很长时，请显式传 `title`。
 - **只开，不关。** 工具无法 dispose 它打开的会话；那是宿主（或用户）的决定。
-- **Peer 范围。** 类型检查与测试都对着 `0.2.0-rc.2` 的宿主包；peer 范围对该系列其余版本放宽到
-  `>=0.1.7-rc.2 <0.3.0`。
+- **宿主包版本范围。** 类型检查与测试都对着 `0.2.0-rc.2` 的宿主包；声明的 peer 范围
+  （指 npm peer 依赖，与 agent 对端无关）对该系列其余版本放宽到 `>=0.1.7-rc.2 <0.3.0`。
 
 ## License
 

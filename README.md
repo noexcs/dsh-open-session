@@ -6,7 +6,7 @@ A **DeepSeek Harness (DSH) host plugin** that adds one model-facing tool, `open_
 session: it opens a new root session **on the same host**, the way the host's own new-session path does.
 
 It is a host-only plugin: no client half, no dependencies beyond the host's own `@deepseek-ai/*`
-packages (declared as peers), nothing else to run.
+packages (declared as npm peer dependencies), nothing else to run.
 
 ## What the tool does
 
@@ -143,8 +143,9 @@ with none of the optional services still opens a session.
   `title`.
 - **Opens, never closes.** The tool cannot dispose a session it opened; that is the host's (or the
   user's) decision.
-- **Peer range.** Type-checked and tested against the `0.2.0-rc.2` host packages; the peer ranges admit
-  `>=0.1.7-rc.2 <0.3.0` for the rest of the series.
+- **Host package range.** Type-checked and tested against the `0.2.0-rc.2` host packages; the declared peer
+  ranges (npm peer dependencies — nothing to do with agent peers) admit `>=0.1.7-rc.2 <0.3.0` for the rest of
+  the series.
 
 ## License
 
